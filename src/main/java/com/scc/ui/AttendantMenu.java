@@ -2,25 +2,33 @@
 package com.scc.ui;
 
 import com.scc.dao.DatabaseConnection;
+import com.scc.dao.ParkingRecordDao;
 import com.scc.model.User;
 
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Scanner;
 
 public class AttendantMenu {
 
     private final Scanner scanner;
     private final User user;
+    private final ParkingRecordDao parkingRecordDao;
 
     public AttendantMenu(Scanner scanner, User user) {
         this.scanner = scanner;
         this.user = user;
+        this.parkingRecordDao = new ParkingRecordDao();
     }
 
     public void show() {
+
         boolean running = true;
 
         while (running) {
+
             System.out.println("\n================================");
             System.out.println("     PARKING ATTENDANT MENU");
             System.out.println("================================");
@@ -34,16 +42,29 @@ public class AttendantMenu {
             String choice = scanner.nextLine().trim();
 
             switch (choice) {
+
                 case "1" -> recordEntry();
+
                 case "2" -> viewParkedVehicles();
+
                 case "3" -> recordExit();
-                case "4" -> running = false;
-                default -> System.out.println("Invalid choice.");
+
+                case "4" -> {
+                    running = false;
+                    System.out.println("Attendant logged out.");
+                }
+
+                default ->
+                        System.out.println("Invalid choice.");
             }
         }
     }
 
+    // RECORD VEHICLE ENTRY
     private void recordEntry() {
+
+        System.out.println("\n========== VEHICLE ENTRY ==========");
+
         System.out.print("Vehicle plate number: ");
         String plate = scanner.nextLine().trim().toUpperCase();
 
@@ -55,79 +76,33 @@ public class AttendantMenu {
             return;
         }
 
-        try (Connection connection = DatabaseConnection.getConnection()) {
-            connection.setAutoCommit(false);
+        // DISPLAY AVAILABLE SLOTS
+        parkingRecordDao.displayAvailableSlots();
 
-            try {
-                String findSlot = """
-                    SELECT id, slot_number
-                    FROM parking_slots
-                    WHERE status = 'AVAILABLE'
-                    ORDER BY id
-                    LIMIT 1
-                """;
+        System.out.print(
+                "\nEnter customer's preferred parking slot: "
+        );
 
-                int slotId;
-                String slotNumber;
+        String preferredSlot =
+                scanner.nextLine().trim().toUpperCase();
 
-                try (PreparedStatement ps =
-                             connection.prepareStatement(findSlot);
-                     ResultSet rs = ps.executeQuery()) {
-
-                    if (!rs.next()) {
-                        System.out.println("No available parking slots.");
-                        connection.rollback();
-                        return;
-                    }
-
-                    slotId = rs.getInt("id");
-                    slotNumber = rs.getString("slot_number");
-                }
-
-                String insertRecord = """
-                    INSERT INTO parking_records
-                    (vehicle_number, owner_name, slot_id, time_in, status)
-                    VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'PARKED')
-                """;
-
-                try (PreparedStatement ps =
-                             connection.prepareStatement(insertRecord)) {
-                    ps.setString(1, plate);
-                    ps.setString(2, owner);
-                    ps.setInt(3, slotId);
-                    ps.executeUpdate();
-                }
-
-                String updateSlot = """
-                    UPDATE parking_slots
-                    SET status = 'OCCUPIED'
-                    WHERE id = ?
-                """;
-
-                try (PreparedStatement ps =
-                             connection.prepareStatement(updateSlot)) {
-                    ps.setInt(1, slotId);
-                    ps.executeUpdate();
-                }
-
-                connection.commit();
-
-                System.out.println("Vehicle entry recorded.");
-                System.out.println("Assigned parking slot: " + slotNumber);
-
-            } catch (SQLException e) {
-                connection.rollback();
-                throw e;
-            } finally {
-                connection.setAutoCommit(true);
-            }
-
-        } catch (SQLException e) {
-            System.out.println("Could not record entry: " + e.getMessage());
+        if (preferredSlot.isEmpty()) {
+            System.out.println("Please select a parking slot.");
+            return;
         }
+
+        // ASSIGN SELECTED SLOT
+        parkingRecordDao.parkVehicle(
+                user.id(),
+                plate,
+                owner,
+                preferredSlot
+        );
     }
 
+    // VIEW PARKED VEHICLES
     private void viewParkedVehicles() {
+
         String sql = """
             SELECT pr.id, pr.vehicle_number, pr.owner_name,
                    ps.slot_number, pr.time_in
@@ -137,37 +112,52 @@ public class AttendantMenu {
             ORDER BY pr.id
         """;
 
-        try (Connection connection = DatabaseConnection.getConnection();
-             PreparedStatement ps = connection.prepareStatement(sql);
+        try (Connection connection =
+                     DatabaseConnection.getConnection();
+             PreparedStatement ps =
+                     connection.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
 
-            System.out.println("\n---------------------------------------------------------------");
-            System.out.printf("%-5s %-15s %-20s %-10s %-20s%n",
-                    "ID", "PLATE", "OWNER", "SLOT", "TIME IN");
-            System.out.println("---------------------------------------------------------------");
+            System.out.println("\n==============================================================");
+            System.out.printf(
+                    "%-5s %-15s %-20s %-10s %-20s%n",
+                    "ID", "PLATE", "OWNER", "SLOT", "TIME IN"
+            );
+            System.out.println("==============================================================");
 
             boolean found = false;
 
             while (rs.next()) {
+
                 found = true;
-                System.out.printf("%-5d %-15s %-20s %-10s %-20s%n",
+
+                System.out.printf(
+                        "%-5d %-15s %-20s %-10s %-20s%n",
                         rs.getInt("id"),
                         rs.getString("vehicle_number"),
                         rs.getString("owner_name"),
                         rs.getString("slot_number"),
-                        rs.getString("time_in"));
+                        rs.getString("time_in")
+                );
             }
 
             if (!found) {
                 System.out.println("No parked vehicles found.");
             }
 
+            System.out.println("==============================================================");
+
         } catch (SQLException e) {
-            System.out.println("Could not load vehicles: " + e.getMessage());
+
+            System.out.println(
+                    "Could not load vehicles: " + e.getMessage()
+            );
         }
     }
 
+    // RECORD VEHICLE EXIT
     private void recordExit() {
+
         viewParkedVehicles();
 
         System.out.print("\nEnter parking record ID: ");
@@ -176,91 +166,55 @@ public class AttendantMenu {
         int recordId;
 
         try {
+
             recordId = Integer.parseInt(input);
+
+            if (recordId <= 0) {
+                System.out.println(
+                        "Please enter a valid record ID."
+                );
+                return;
+            }
+
         } catch (NumberFormatException e) {
-            System.out.println("Please enter a valid numeric ID.");
+
+            System.out.println(
+                    "Please enter a valid numeric ID."
+            );
             return;
         }
 
-        try (Connection connection = DatabaseConnection.getConnection()) {
-            connection.setAutoCommit(false);
+        System.out.println("\nParking rate: ₱20.00 per hour.");
 
-            try {
-                String findRecord = """
-                    SELECT slot_id, time_in
-                    FROM parking_records
-                    WHERE id = ? AND status = 'PARKED'
-                """;
+        System.out.print(
+                "Enter calculated parking fee: ₱"
+        );
 
-                int slotId;
-                Timestamp timeIn;
+        String feeInput = scanner.nextLine().trim();
 
-                try (PreparedStatement ps =
-                             connection.prepareStatement(findRecord)) {
-                    ps.setInt(1, recordId);
+        double fee;
 
-                    try (ResultSet rs = ps.executeQuery()) {
-                        if (!rs.next()) {
-                            System.out.println("Parked vehicle not found.");
-                            connection.rollback();
-                            return;
-                        }
+        try {
 
-                        slotId = rs.getInt("slot_id");
-                        timeIn = rs.getTimestamp("time_in");
-                    }
-                }
+            fee = Double.parseDouble(feeInput);
 
-                long elapsedMillis =
-                        System.currentTimeMillis() - timeIn.getTime();
-
-                long hours = Math.max(
-                        1, (long) Math.ceil(elapsedMillis / 3600000.0)
-                );
-
-                double fee = hours * 20.0;
-
-                String updateRecord = """
-                    UPDATE parking_records
-                    SET time_out = CURRENT_TIMESTAMP,
-                        fee = ?, status = 'COMPLETED'
-                    WHERE id = ? AND status = 'PARKED'
-                """;
-
-                try (PreparedStatement ps =
-                             connection.prepareStatement(updateRecord)) {
-                    ps.setDouble(1, fee);
-                    ps.setInt(2, recordId);
-                    ps.executeUpdate();
-                }
-
-                String updateSlot = """
-                    UPDATE parking_slots
-                    SET status = 'AVAILABLE'
-                    WHERE id = ?
-                """;
-
-                try (PreparedStatement ps =
-                             connection.prepareStatement(updateSlot)) {
-                    ps.setInt(1, slotId);
-                    ps.executeUpdate();
-                }
-
-                connection.commit();
-
-                System.out.println("Vehicle exit recorded.");
-                System.out.println("Parking duration: " + hours + " hour(s)");
-                System.out.printf("Parking fee: ₱%.2f%n", fee);
-
-            } catch (SQLException e) {
-                connection.rollback();
-                throw e;
-            } finally {
-                connection.setAutoCommit(true);
+            if (!Double.isFinite(fee) || fee < 0) {
+                System.out.println("Invalid parking fee.");
+                return;
             }
 
-        } catch (SQLException e) {
-            System.out.println("Could not record exit: " + e.getMessage());
+        } catch (NumberFormatException e) {
+
+            System.out.println(
+                    "Please enter a valid parking fee."
+            );
+            return;
         }
+
+        parkingRecordDao.checkoutVehicle(
+                user.id(),
+                recordId,
+                fee
+        );
     }
 }

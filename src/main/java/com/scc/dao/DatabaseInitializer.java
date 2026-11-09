@@ -5,15 +5,16 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.Statement;
 
 public class DatabaseInitializer {
 
     public static void initialize() throws Exception {
+
         try (Connection connection = DatabaseConnection.getConnection();
              Statement statement = connection.createStatement()) {
 
+            // USERS TABLE
             statement.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,6 +25,7 @@ public class DatabaseInitializer {
                 )
             """);
 
+            // PARKING SLOTS TABLE
             statement.execute("""
                 CREATE TABLE IF NOT EXISTS parking_slots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +34,7 @@ public class DatabaseInitializer {
                 )
             """);
 
+            // PARKING RECORDS TABLE
             statement.execute("""
                 CREATE TABLE IF NOT EXISTS parking_records (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,15 +45,35 @@ public class DatabaseInitializer {
                     time_out TEXT,
                     fee REAL NOT NULL DEFAULT 0,
                     status TEXT NOT NULL DEFAULT 'PARKED',
-                    FOREIGN KEY (slot_id) REFERENCES parking_slots(id)
+                    FOREIGN KEY (slot_id)
+                        REFERENCES parking_slots(id)
                 )
             """);
 
+            // ACTIVITY LOGS TABLE
+            statement.execute("""
+                CREATE TABLE IF NOT EXISTS activity_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    action_type TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id)
+                        REFERENCES users(id)
+                        ON DELETE CASCADE
+                )
+            """);
+
+            // CREATE DEFAULT PARKING SLOTS ONLY
             createDefaultSlots(connection);
-            createDefaultAdmin(connection);
+
+            System.out.println("Database initialized successfully.");
+            System.out.println("Activity logs table is ready.");
+            System.out.println("No default administrator account was created.");
         }
     }
 
+    // CREATE DEFAULT PARKING SLOTS
     private static void createDefaultSlots(Connection connection)
             throws Exception {
 
@@ -60,6 +83,7 @@ public class DatabaseInitializer {
         """;
 
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
+
             for (int i = 1; i <= 10; i++) {
                 ps.setString(1, String.format("P%02d", i));
                 ps.executeUpdate();
@@ -67,35 +91,12 @@ public class DatabaseInitializer {
         }
     }
 
-    private static void createDefaultAdmin(Connection connection)
+    // PASSWORD HASHING
+    public static String hashPassword(String password)
             throws Exception {
 
-        String checkSql = "SELECT COUNT(*) FROM users";
-
-        try (Statement statement = connection.createStatement();
-             ResultSet rs = statement.executeQuery(checkSql)) {
-
-            if (rs.next() && rs.getInt(1) == 0) {
-                String sql = """
-                    INSERT INTO users (username, password, roles, status)
-                    VALUES (?, ?, 'ADMIN', 'APPROVED')
-                """;
-
-                try (PreparedStatement ps =
-                             connection.prepareStatement(sql)) {
-
-                    ps.setString(1, "admin");
-                    ps.setString(2, hashPassword("Admin123!"));
-                    ps.executeUpdate();
-                }
-
-                System.out.println("Default administrator account created.");
-            }
-        }
-    }
-
-    public static String hashPassword(String password) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
+
         byte[] hash = digest.digest(
                 password.getBytes(StandardCharsets.UTF_8)
         );

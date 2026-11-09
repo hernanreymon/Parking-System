@@ -21,9 +21,11 @@ public class CustomerMenu {
     }
 
     public void show() {
+
         boolean running = true;
 
         while (running) {
+
             System.out.println("\n================================");
             System.out.println("          CUSTOMER MENU");
             System.out.println("================================");
@@ -35,37 +37,64 @@ public class CustomerMenu {
             String choice = scanner.nextLine().trim();
 
             switch (choice) {
-                case "1" -> viewParkingSlots();
-                case "2" -> running = false;
-                default -> System.out.println("Invalid choice.");
+
+                case "1" ->
+                        viewParkingSlots();
+
+                case "2" -> {
+                    running = false;
+                    System.out.println("Customer logged out.");
+                }
+
+                default ->
+                        System.out.println("Invalid choice.");
             }
         }
     }
 
+    // VIEW PARKING SLOTS
     private void viewParkingSlots() {
+
         String sql = """
             SELECT slot_number, status
             FROM parking_slots
             ORDER BY slot_number
         """;
 
-        try (Connection connection = DatabaseConnection.getConnection();
-             PreparedStatement ps = connection.prepareStatement(sql);
+        try (Connection connection =
+                     DatabaseConnection.getConnection();
+             PreparedStatement ps =
+                     connection.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
 
-            System.out.println("\n-----------------------------");
-            System.out.printf("%-15s %-15s%n", "PARKING SLOT", "STATUS");
-            System.out.println("-----------------------------");
+            System.out.println("\n--------------------------------");
+            System.out.printf("%-15s %-15s%n",
+                    "PARKING SLOT", "STATUS");
+            System.out.println("--------------------------------");
+
+            boolean found = false;
 
             while (rs.next()) {
+
+                found = true;
+
                 System.out.printf("%-15s %-15s%n",
                         rs.getString("slot_number"),
                         rs.getString("status"));
             }
 
+            if (!found) {
+                System.out.println("No parking slots available.");
+            }
+
+            System.out.println("--------------------------------");
+
         } catch (SQLException e) {
-            System.out.println("Could not load parking slots: "
-                    + e.getMessage());
+
+            System.out.println(
+                    "Could not load parking slots: "
+                            + e.getMessage()
+            );
         }
     }
 }
